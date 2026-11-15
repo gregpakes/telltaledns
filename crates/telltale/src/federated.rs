@@ -50,6 +50,13 @@ enum Read {
         limit: usize,
         group: String,
     },
+    /// REQ: OBS-004 (ADR-157) — a top list over a window.
+    TopRange {
+        kind: TopKind,
+        from_s: u64,
+        to_s: u64,
+        limit: usize,
+    },
     Latency {
         by: LatencyBy,
         hour: Hour,
@@ -185,6 +192,12 @@ fn answer(b: &dyn Backend, r: Read) -> Result<Vec<u8>, String> {
             limit,
             group,
         } => serde_json::to_vec(&b.top_in_group(kind, hour, limit, &group).map_err(text)?),
+        Read::TopRange {
+            kind,
+            from_s,
+            to_s,
+            limit,
+        } => serde_json::to_vec(&b.top_range(kind, from_s, to_s, limit)),
         Read::Latency { by, hour } => serde_json::to_vec(&b.latency(by, hour)),
         Read::LatencyHist { by, hour } => serde_json::to_vec(&b.latency_hists(by, hour)),
         Read::NewDevices { since_s } => serde_json::to_vec(&b.new_devices(since_s)),
@@ -1291,6 +1304,20 @@ impl Backend for Federated {
         });
         if self.with_me() {
             parts.push(self.local.top(kind, hour, limit, client));
+        }
+        federation::merge_top(parts, limit)
+    }
+    // REQ: OBS-004 (ADR-157) — each node sums its own hours; the lists merge by key. A peer
+    // one version behind doesn't know the read and is listed in `missingNodes`.
+    fn top_range(&self, kind: TopKind, from_s: u64, to_s: u64, limit: usize) -> Vec<TopItem> {
+        let mut parts: Vec<Vec<TopItem>> = self.everyone(|| Read::TopRange {
+            kind,
+            from_s,
+            to_s,
+            limit,
+        });
+        if self.with_me() {
+            parts.push(self.local.top_range(kind, from_s, to_s, limit));
         }
         federation::merge_top(parts, limit)
     }
